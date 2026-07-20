@@ -1,0 +1,24 @@
+{
+  "short_name": "Family Centrum",
+  "name": "Family Centrum - Rodinný kalendář",
+  "description": "Moderní bento rodinný organizér s kalendářem, přítomností a nástroji.",
+  "icons": [
+    {
+      "src": "/family_centrum_icon.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any"
+    },
+    {
+      "src": "/family_centrum_icon.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#e0e7ff",
+  "theme_color": "#4f46e5",
+  "display": "standalone",
+  "orientation": "portrait-primary"
+}

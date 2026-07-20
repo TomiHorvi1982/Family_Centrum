@@ -1,0 +1,6 @@
+{
+  "name": "Family Centrum",
+  "description": "Aplikace pro plánování rodinných aktivit, sdílení času, správu důležitých kontaktů a tipy na rodinné výlety v Bohumíně a okolí.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
