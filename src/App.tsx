@@ -20,6 +20,7 @@ import {
   Moon,
   ShoppingCart,
   PiggyBank,
+  Coins,
   ClipboardList,
   MessageSquare,
   HelpCircle,
@@ -43,6 +44,7 @@ import MonthlyPrintView from './components/MonthlyPrintView';
 import CelebrationsView from './components/CelebrationsView';
 import ShoppingListView from './components/ShoppingListView';
 import ExpensesView from './components/ExpensesView';
+import PocketMoneyView from './components/PocketMoneyView';
 import DutiesView from './components/DutiesView';
 import MessageWallView from './components/MessageWallView';
 import WhatToDoView from './components/WhatToDoView';
@@ -150,7 +152,9 @@ const INITIAL_MEDICATIONS: MedicationLog[] = [
         givenBy: 'member-1',
         note: 'Teplota 38.1 °C před spaním'
       }
-    ]
+    ],
+    intervalHours: 6,
+    remindersEnabled: true
   },
   {
     id: 'med-2',
@@ -169,7 +173,9 @@ const INITIAL_MEDICATIONS: MedicationLog[] = [
         givenBy: 'member-1',
         note: 'Hustá rýma a pálení očí'
       }
-    ]
+    ],
+    intervalHours: 24,
+    remindersEnabled: false
   }
 ];
 
@@ -225,7 +231,7 @@ export default function App() {
     }
   }, [darkMode]);
   
-  const [activeTab, setActiveTab] = useState<'calendar' | 'presence' | 'school' | 'homework' | 'print' | 'celebrations' | 'tips' | 'shopping' | 'expenses' | 'contacts' | 'family' | 'duties' | 'wall' | 'what-to-do' | 'medication'>('calendar');
+  const [activeTab, setActiveTab] = useState<'calendar' | 'presence' | 'school' | 'homework' | 'print' | 'celebrations' | 'tips' | 'shopping' | 'expenses' | 'pocket-money' | 'contacts' | 'family' | 'duties' | 'wall' | 'what-to-do' | 'medication'>('calendar');
 
   // --- PWA & OFFLINE STATES ---
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
@@ -249,6 +255,13 @@ export default function App() {
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
+    // Listen to custom family notifications
+    const handleFamilyNotification = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      triggerNotification(customEvent.detail, 'success');
+    };
+    window.addEventListener('family_notification', handleFamilyNotification);
+
     // Capture browser PWA installation trigger
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
@@ -264,6 +277,7 @@ export default function App() {
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('family_notification', handleFamilyNotification);
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     };
   }, []);
@@ -544,6 +558,17 @@ export default function App() {
     triggerNotification('Lék byl odstraněn ze seznamu.');
   };
 
+  const handleUpdateMedication = (medId: string, updates: Partial<MedicationLog>) => {
+    const updated = medications.map(m => {
+      if (m.id === medId) {
+        return { ...m, ...updates };
+      }
+      return m;
+    });
+    setMedications(updated);
+    localStorage.setItem('family_medications', JSON.stringify(updated));
+  };
+
   const handleAddTask = (newTaskData: Omit<HomeworkTask, 'id' | 'completed' | 'createdAt'>) => {
     const newTask: HomeworkTask = {
       ...newTaskData,
@@ -657,11 +682,19 @@ export default function App() {
     triggerNotification(`Zpráva byla přečtena a odstraněna.`);
   };
 
-  const handleAddActivity = (newAct: Activity) => {
-    const updated = [...activities, newAct];
-    setActivities(updated);
-    localStorage.setItem('family_activities', JSON.stringify(updated));
-    triggerNotification(`Nová aktivita "${newAct.title}" byla uložena do kalendáře.`);
+  const handleAddActivity = (newAct: Activity | Activity[]) => {
+    const actsToAdd = Array.isArray(newAct) ? newAct : [newAct];
+    setActivities(prev => {
+      const updated = [...prev, ...actsToAdd];
+      localStorage.setItem('family_activities', JSON.stringify(updated));
+      return updated;
+    });
+    
+    if (actsToAdd.length === 1) {
+      triggerNotification(`Nová aktivita "${actsToAdd[0].title}" byla uložena do kalendáře.`);
+    } else {
+      triggerNotification(`Bylo vytvořeno ${actsToAdd.length} pravidelných událostí.`);
+    }
   };
 
   const handleUpdateActivity = (updatedAct: Activity) => {
@@ -1124,6 +1157,19 @@ export default function App() {
             </button>
 
             <button
+              id="tab-btn-pocket-money"
+              onClick={() => setActiveTab('pocket-money')}
+              className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl text-xs font-bold uppercase tracking-wider transition whitespace-nowrap border ${
+                activeTab === 'pocket-money' 
+                  ? 'bg-indigo-600 text-white border-transparent shadow-sm' 
+                  : 'bg-white text-slate-600 hover:bg-slate-100 border-slate-200 hover:text-slate-900 shadow-3xs'
+              }`}
+            >
+              <Coins className="w-4 h-4 text-amber-500 animate-pulse" />
+              Kapesné dětí
+            </button>
+
+            <button
               id="tab-btn-contacts"
               onClick={() => setActiveTab('contacts')}
               className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl text-xs font-bold uppercase tracking-wider transition whitespace-nowrap border ${
@@ -1291,6 +1337,7 @@ export default function App() {
                 onAddMedication={handleAddMedication}
                 onGiveMedication={handleGiveMedication}
                 onDeleteMedication={handleDeleteMedication}
+                onUpdateMedication={handleUpdateMedication}
               />
             )}
 
@@ -1313,6 +1360,12 @@ export default function App() {
 
             {activeTab === 'expenses' && (
               <ExpensesView 
+                members={members}
+              />
+            )}
+
+            {activeTab === 'pocket-money' && (
+              <PocketMoneyView 
                 members={members}
               />
             )}

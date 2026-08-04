@@ -442,6 +442,51 @@ export default function ShoppingListView({ members }: ShoppingListViewProps) {
             </div>
           </div>
 
+          {/* Akční letáky obchodů */}
+          <div className="bento-card p-6 bg-white rounded-3xl border border-slate-200 shadow-3xs">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="p-2 bg-emerald-50 dark:bg-emerald-500/10 rounded-xl text-emerald-600 dark:text-emerald-400">
+                <ShoppingCart className="w-4 h-4" />
+              </div>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white">Akční letáky online</h3>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mb-4">
+              Prohlédněte si aktuální slevy a naplánujte rodinný nákup výhodně:
+            </p>
+
+            <div className="space-y-2.5">
+              {[
+                { name: 'Lidl leták', url: 'https://www.lidl.cz/c/online-letaky/s10007875', color: 'from-blue-600 to-amber-400 hover:to-amber-500', logoText: 'Lidl', desc: 'Čerstvost a týdenní akce' },
+                { name: 'Kaufland leták', url: 'https://www.kaufland.cz/akce/letaky.html', color: 'from-red-600 to-rose-500 hover:to-rose-600', logoText: 'Kaufland', desc: 'Velký výběr, skvělé ceny' },
+                { name: 'Penny Market', url: 'https://www.penny.cz/letaky', color: 'from-red-500 to-amber-500 hover:to-amber-600', logoText: 'Penny', desc: 'Hezky česky, nejvýhodněji' },
+                { name: 'Albert leták', url: 'https://www.albert.cz/letaky', color: 'from-emerald-500 to-yellow-400 hover:to-yellow-500', logoText: 'Albert', desc: 'Zdravá a kvalitní jídla' }
+              ].map((leaflet, idx) => (
+                <a
+                  key={idx}
+                  href={leaflet.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="group flex items-center justify-between p-3 rounded-2xl bg-slate-50 hover:bg-slate-100 border border-slate-100 hover:border-slate-200 transition"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className={`w-10 h-10 rounded-xl bg-gradient-to-br ${leaflet.color} text-white flex items-center justify-center font-black text-xs shadow-3xs tracking-wider select-none shrink-0`}>
+                      {leaflet.logoText[0]}
+                    </span>
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 group-hover:text-indigo-600 transition">
+                        {leaflet.name}
+                      </h4>
+                      <p className="text-[10px] text-slate-400 dark:text-slate-500">
+                        {leaflet.desc}
+                      </p>
+                    </div>
+                  </div>
+                  <ArrowRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-600 group-hover:translate-x-0.5 transition" />
+                </a>
+              ))}
+            </div>
+          </div>
+
         </div>
 
         {/* Right Column - Filters and Shopping list */}

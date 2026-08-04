@@ -209,13 +209,21 @@ export default function DutiesView({
                       ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           {childDuties.map((duty) => (
-                            <motion.button
+                            <motion.div
                               id={`duty-card-${duty.id}`}
                               key={duty.id}
                               whileHover={{ scale: 1.02 }}
                               whileTap={{ scale: 0.98 }}
                               onClick={() => onToggleDuty(duty.id)}
-                              className={`relative text-left p-4 rounded-2xl border transition-all duration-300 overflow-hidden flex items-center gap-3.5 shadow-2xs cursor-pointer group ${
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  onToggleDuty(duty.id);
+                                }
+                              }}
+                              tabIndex={0}
+                              role="button"
+                              className={`relative text-left p-4 rounded-2xl border transition-all duration-300 overflow-hidden flex items-center gap-3.5 shadow-2xs cursor-pointer group focus:outline-hidden focus:ring-2 focus:ring-indigo-500/50 ${
                                 duty.completed
                                   ? 'bg-slate-50/50 dark:bg-slate-900/30 border-slate-200 dark:border-slate-800 opacity-50 filter saturate-50 line-through'
                                   : 'bg-white dark:bg-slate-800 border-slate-200 hover:border-indigo-300 dark:border-slate-700 dark:hover:border-slate-600 hover:shadow-xs'
@@ -262,7 +270,7 @@ export default function DutiesView({
                               >
                                 <Trash2 className="w-3 h-3" />
                               </button>
-                            </motion.button>
+                            </motion.div>
                           ))}
                         </div>
                       )}

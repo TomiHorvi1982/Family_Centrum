@@ -25,7 +25,7 @@ interface CalendarViewProps {
   activities: Activity[];
   selectedDate: string;
   onDateChange: (date: string) => void;
-  onAddActivity: (activity: Activity) => void;
+  onAddActivity: (activity: Activity | Activity[]) => void;
   onUpdateActivity: (activity: Activity) => void;
   onDeleteActivity: (id: string) => void;
   quickAddState: { memberId: string; date: string; hour: number } | null;
@@ -82,6 +82,12 @@ export default function CalendarView({
   const [type, setType] = useState<ActivityType>('free');
   const [location, setLocation] = useState('');
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
+
+  // Recurrence States
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [recurrenceType, setRecurrenceType] = useState<'daily' | 'weekly' | 'workdays' | 'custom'>('weekly');
+  const [repeatUntil, setRepeatUntil] = useState('2026-07-19');
+  const [selectedWeekdays, setSelectedWeekdays] = useState<number[]>([1]);
 
   // Open Add form with defaults or quickAdd values
   React.useEffect(() => {
@@ -141,6 +147,49 @@ export default function CalendarView({
     setSelectedMemberIds(members.map(m => m.id));
   };
 
+// Date helper to generate recurrence array
+const generateRecurrenceDates = (startDateStr: string, endDateStr: string, type: 'daily' | 'weekly' | 'workdays' | 'custom', weekdays: number[]): string[] => {
+  const dates: string[] = [];
+  const start = new Date(startDateStr);
+  const end = new Date(endDateStr);
+  
+  if (isNaN(start.getTime()) || isNaN(end.getTime()) || start > end) {
+    return [startDateStr];
+  }
+  
+  const current = new Date(start);
+  while (current <= end) {
+    const yyyy = current.getFullYear();
+    const mm = String(current.getMonth() + 1).padStart(2, '0');
+    const dd = String(current.getDate()).padStart(2, '0');
+    const dateStr = `${yyyy}-${mm}-${dd}`;
+    
+    const jsDay = current.getDay();
+    const normalizedDay = jsDay === 0 ? 7 : jsDay;
+    
+    let include = false;
+    if (type === 'daily') {
+      include = true;
+    } else if (type === 'weekly') {
+      const startJsDay = start.getDay();
+      const startNormalizedDay = startJsDay === 0 ? 7 : startJsDay;
+      include = normalizedDay === startNormalizedDay;
+    } else if (type === 'workdays') {
+      include = normalizedDay >= 1 && normalizedDay <= 5;
+    } else if (type === 'custom') {
+      include = weekdays.includes(normalizedDay);
+    }
+    
+    if (include) {
+      dates.push(dateStr);
+    }
+    
+    current.setDate(current.getDate() + 1);
+  }
+  
+  return dates;
+};
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim() || selectedMemberIds.length === 0 || !date) return;
@@ -158,6 +207,21 @@ export default function CalendarView({
         location: location.trim() || undefined
       });
       setEditingId(null);
+    } else if (isRecurring) {
+      const recurrenceDates = generateRecurrenceDates(date, repeatUntil, recurrenceType, selectedWeekdays);
+      const acts: Activity[] = recurrenceDates.map((d, index) => ({
+        id: `act-${Date.now()}-${index}-${Math.floor(Math.random() * 1000)}`,
+        title,
+        description: description.trim() || undefined,
+        memberIds: selectedMemberIds,
+        date: d,
+        startTime,
+        endTime,
+        type,
+        location: location.trim() || undefined
+      }));
+      onAddActivity(acts);
+      setIsAdding(false);
     } else {
       onAddActivity({
         id: 'act-' + Date.now(),
@@ -185,6 +249,10 @@ export default function CalendarView({
     setType('free');
     setLocation('');
     setSelectedMemberIds([]);
+    setIsRecurring(false);
+    setRecurrenceType('weekly');
+    setRepeatUntil('2026-07-19');
+    setSelectedWeekdays([1]);
   };
 
   // Filter and sort activities
@@ -350,6 +418,93 @@ export default function CalendarView({
                     className="w-full text-sm border border-slate-200 rounded-xl px-3 py-2 bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-500 text-slate-800"
                   />
                 </div>
+
+                {/* Recurrence Section (only when adding new activity) */}
+                {!editingId && (
+                  <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        id="activity-is-recurring"
+                        type="checkbox"
+                        checked={isRecurring}
+                        onChange={(e) => setIsRecurring(e.target.checked)}
+                        className="w-4.5 h-4.5 text-indigo-600 border-slate-300 rounded-sm focus:ring-indigo-500"
+                      />
+                      <span className="text-xs font-bold text-slate-700 uppercase tracking-wide">Pravidelně se opakující aktivita</span>
+                    </label>
+
+                    {isRecurring && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-200">
+                        <div className="space-y-1">
+                          <label htmlFor="recurrence-type" className="text-[10px] font-bold text-slate-500 uppercase">Frekvence opakování</label>
+                          <select
+                            id="recurrence-type"
+                            value={recurrenceType}
+                            onChange={(e) => setRecurrenceType(e.target.value as any)}
+                            className="w-full text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-500 text-slate-800"
+                          >
+                            <option value="daily">Každý den</option>
+                            <option value="weekly">Každý týden</option>
+                            <option value="workdays">Pracovní dny (Po - Pá)</option>
+                            <option value="custom">Vlastní dny v týdnu</option>
+                          </select>
+                        </div>
+
+                        <div className="space-y-1">
+                          <label htmlFor="repeat-until" className="text-[10px] font-bold text-slate-500 uppercase">Opakovat až do</label>
+                          <input
+                            id="repeat-until"
+                            type="date"
+                            required={isRecurring}
+                            value={repeatUntil}
+                            onChange={(e) => setRepeatUntil(e.target.value)}
+                            className="w-full text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 bg-white focus:outline-hidden focus:ring-2 focus:ring-blue-500 text-slate-800"
+                          />
+                        </div>
+
+                        {recurrenceType === 'custom' && (
+                          <div className="sm:col-span-2 space-y-1">
+                            <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Vyberte dny v týdnu</label>
+                            <div className="flex flex-wrap gap-1">
+                              {[
+                                { val: 1, label: 'Po' },
+                                { val: 2, label: 'Út' },
+                                { val: 3, label: 'St' },
+                                { val: 4, label: 'Čt' },
+                                { val: 5, label: 'Pá' },
+                                { val: 6, label: 'So' },
+                                { val: 7, label: 'Ne' }
+                              ].map(day => {
+                                const isSel = selectedWeekdays.includes(day.val);
+                                return (
+                                  <button
+                                    id={`btn-custom-weekday-${day.val}`}
+                                    key={day.val}
+                                    type="button"
+                                    onClick={() => {
+                                      setSelectedWeekdays(prev => 
+                                        prev.includes(day.val)
+                                          ? prev.filter(v => v !== day.val)
+                                          : [...prev, day.val]
+                                      );
+                                    }}
+                                    className={`px-3 py-1 text-xs font-bold rounded-lg border transition ${
+                                      isSel 
+                                        ? 'bg-indigo-600 border-transparent text-white' 
+                                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                                    }`}
+                                  >
+                                    {day.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Right Column: Family Members checkbox */}

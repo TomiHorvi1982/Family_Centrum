@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Member, MedicationLog, MedicationHistoryEntry } from '../types';
 import { 
   Pill, 
@@ -15,7 +15,11 @@ import {
   HeartPulse,
   ChevronRight,
   ShieldAlert,
-  Info
+  Info,
+  Bell,
+  BellRing,
+  BellOff,
+  Volume2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -25,6 +29,7 @@ interface MedicationViewProps {
   onAddMedication: (med: Omit<MedicationLog, 'id' | 'lastGiven' | 'givenBy' | 'history'>) => void;
   onGiveMedication: (medId: string, parentId: string, dosage: string, note?: string) => void;
   onDeleteMedication: (medId: string) => void;
+  onUpdateMedication: (medId: string, updates: Partial<MedicationLog>) => void;
 }
 
 export default function MedicationView({
@@ -32,7 +37,8 @@ export default function MedicationView({
   medications,
   onAddMedication,
   onGiveMedication,
-  onDeleteMedication
+  onDeleteMedication,
+  onUpdateMedication
 }: MedicationViewProps) {
   
   // Security parent mode states
@@ -54,6 +60,189 @@ export default function MedicationView({
   const [newIllness, setNewIllness] = useState('');
   const [newDosage, setNewDosage] = useState('');
   const [newNotes, setNewNotes] = useState('');
+  const [newIntervalHours, setNewIntervalHours] = useState<number>(8);
+  const [newRemindersEnabled, setNewRemindersEnabled] = useState<boolean>(true);
+
+  // Browser notification permission state
+  const [notificationPermission, setNotificationPermission] = useState<string>(() => {
+    return typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default';
+  });
+
+  // Track already notified doses to avoid spamming
+  const [notifiedDoses, setNotifiedDoses] = useState<Record<string, boolean>>(() => {
+    try {
+      const stored = localStorage.getItem('family_notified_doses');
+      return stored ? JSON.parse(stored) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const saveNotifiedDose = (doseKey: string) => {
+    setNotifiedDoses(prev => {
+      const updated = { ...prev, [doseKey]: true };
+      localStorage.setItem('family_notified_doses', JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const requestNotificationPermission = async () => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      try {
+        const permission = await Notification.requestPermission();
+        setNotificationPermission(permission);
+        if (permission === 'granted') {
+          new Notification('Upozornění aktivována! 🔔', {
+            body: 'Nyní budete dostávat automatická připomenutí léků pro vaše děti.',
+            icon: '/favicon.ico'
+          });
+        }
+      } catch (err) {
+        console.error('Request notification permission failed', err);
+      }
+    }
+  };
+
+  // Double beep alarm sound using Web Audio API
+  const playAlertSound = () => {
+    try {
+      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContext) return;
+      const ctx = new AudioContext();
+      
+      const playBeep = (delay: number, freq: number, duration: number) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        
+        osc.frequency.setValueAtTime(freq, ctx.currentTime + delay);
+        gain.gain.setValueAtTime(0.2, ctx.currentTime + delay);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + delay + duration);
+        
+        osc.start(ctx.currentTime + delay);
+        osc.stop(ctx.currentTime + delay + duration);
+      };
+      
+      playBeep(0, 659.25, 0.15); // E5
+      playBeep(0.25, 659.25, 0.15); // E5
+    } catch (e) {
+      console.warn('Web Audio beep error:', e);
+    }
+  };
+
+  // Helper to compute countdown and overdue information
+  const getNextDoseInfo = (med: MedicationLog) => {
+    if (!med.lastGiven || !med.intervalHours) return null;
+    
+    const lastGivenTime = new Date(med.lastGiven).getTime();
+    const nextDoseTime = lastGivenTime + med.intervalHours * 3600 * 1000;
+    const now = Date.now();
+    const diffMs = nextDoseTime - now;
+    const diffMins = Math.round(diffMs / 60000);
+    
+    const formattedNextTime = new Date(nextDoseTime).toLocaleTimeString('cs-CZ', {
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+    const formattedNextDate = new Date(nextDoseTime).toLocaleDateString('cs-CZ', {
+      day: 'numeric',
+      month: 'short'
+    });
+
+    const isOverdue = diffMs < 0;
+    const absDiffMins = Math.abs(diffMins);
+    const absDiffHours = Math.floor(absDiffMins / 60);
+    const remainingMins = absDiffMins % 60;
+
+    let relativeText = '';
+    if (isOverdue) {
+      if (absDiffMins < 60) {
+        relativeText = `Mělo být podáno před ${absDiffMins} min`;
+      } else {
+        relativeText = `Zpoždění o ${absDiffHours} hod ${remainingMins} min`;
+      }
+    } else {
+      if (absDiffMins < 60) {
+        relativeText = `Za ${absDiffMins} minut`;
+      } else {
+        relativeText = `Za ${absDiffHours} hod ${remainingMins} min`;
+      }
+    }
+
+    return {
+      nextDoseTime,
+      formattedNextTime,
+      formattedNextDate,
+      isOverdue,
+      relativeText,
+      diffMins
+    };
+  };
+
+  // Background check for all medications with active reminders
+  useEffect(() => {
+    const checkReminders = () => {
+      const now = Date.now();
+      
+      medications.forEach(med => {
+        if (!med.remindersEnabled || !med.intervalHours || !med.lastGiven) return;
+        
+        const nextDueTime = new Date(med.lastGiven).getTime() + med.intervalHours * 3600 * 1000;
+        
+        // If overdue
+        if (now >= nextDueTime) {
+          const doseKey = `${med.id}-${med.lastGiven}`;
+          
+          if (!notifiedDoses[doseKey]) {
+            const child = members.find(m => m.id === med.childId);
+            const childName = child?.name || 'Dítě';
+            const childAvatar = child?.avatar || '👶';
+            
+            const title = `⏰ Čas na lék: ${med.name} pro ${childName}`;
+            const body = `${childAvatar} ${childName} má dostat lék ${med.name} (${med.dosage}). Interval ${med.intervalHours} hod. vypršel.`;
+            
+            // 1. Browser Notification
+            if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+              try {
+                new Notification(title, {
+                  body: body,
+                  tag: med.id,
+                  icon: '/favicon.ico'
+                });
+              } catch (err) {
+                console.error('Failed to show standard notification', err);
+              }
+            }
+            
+            // 2. Play Audio Alert
+            playAlertSound();
+            
+            // 3. Dispatch global toast notification
+            const event = new CustomEvent('family_notification', { 
+              detail: `⏰ ČAS NA LÉK: ${childName} má dostat ${med.name} (${med.dosage})!` 
+            });
+            window.dispatchEvent(event);
+            
+            // 4. Mark as notified
+            saveNotifiedDose(doseKey);
+          }
+        }
+      });
+    };
+    
+    checkReminders();
+    const interval = setInterval(checkReminders, 10000);
+    return () => clearInterval(interval);
+  }, [medications, members, notifiedDoses]);
+
+  const handleToggleCardReminder = (medId: string, currentVal: boolean) => {
+    onUpdateMedication(medId, { remindersEnabled: !currentVal });
+  };
+
+  const handleUpdateCardInterval = (medId: string, hours: number) => {
+    onUpdateMedication(medId, { intervalHours: hours });
+  };
 
   // Give medicine states (keyed by medication ID)
   const [giveDosage, setGiveDosage] = useState<Record<string, string>>({});
@@ -91,7 +280,9 @@ export default function MedicationView({
       name: newName.trim(),
       illness: newIllness.trim(),
       dosage: newDosage.trim(),
-      notes: newNotes.trim() || undefined
+      notes: newNotes.trim() || undefined,
+      intervalHours: newRemindersEnabled ? newIntervalHours : undefined,
+      remindersEnabled: newRemindersEnabled
     });
 
     // Reset
@@ -99,6 +290,8 @@ export default function MedicationView({
     setNewIllness('');
     setNewDosage('');
     setNewNotes('');
+    setNewIntervalHours(8);
+    setNewRemindersEnabled(true);
     setIsAddingMed(false);
   };
 
@@ -295,6 +488,33 @@ export default function MedicationView({
         </div>
       </div>
 
+      {/* Browser Notification Setup Banner */}
+      {notificationPermission !== 'granted' && (
+        <motion.div 
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-gradient-to-r from-amber-500/10 via-amber-600/5 to-amber-500/10 border border-amber-200 rounded-3xl p-5 flex flex-col sm:flex-row items-center justify-between gap-4"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-600 flex items-center justify-center text-xl shrink-0">
+              <Bell className="w-5 h-5 animate-bounce" />
+            </div>
+            <div>
+              <h4 className="text-xs sm:text-sm font-extrabold text-slate-900">Aktivujte si automatické notifikace v prohlížeči 🔔</h4>
+              <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5">
+                Aplikace vás včas upozorní zvukem a zprávou na ploše, když vyprší nastavený interval a je čas podat dítěti další dávku léku.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={requestNotificationPermission}
+            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold uppercase tracking-wider shadow-xs transition shrink-0 cursor-pointer"
+          >
+            Povolit upozornění
+          </button>
+        </motion.div>
+      )}
+
       {/* Form to Add Medication */}
       <AnimatePresence>
         {isAddingMed && (
@@ -378,6 +598,46 @@ export default function MedicationView({
                     className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
                   />
                 </div>
+
+                {/* Reminders Toggle */}
+                <div className="space-y-1.5 md:col-span-1">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block">Připomenutí (Notifikace)</label>
+                  <button
+                    type="button"
+                    onClick={() => setNewRemindersEnabled(!newRemindersEnabled)}
+                    className={`w-full flex items-center justify-between border rounded-2xl px-4 py-3.5 text-sm font-semibold transition ${
+                      newRemindersEnabled 
+                        ? 'bg-emerald-50/50 border-emerald-200 text-emerald-800' 
+                        : 'bg-slate-50 border-slate-200 text-slate-500'
+                    }`}
+                  >
+                    <span className="flex items-center gap-2">
+                      {newRemindersEnabled ? <Bell className="w-4 h-4 text-emerald-600" /> : <BellOff className="w-4 h-4" />}
+                      {newRemindersEnabled ? 'Aktivní připomenutí' : 'Bez připomenutí'}
+                    </span>
+                    <span className="text-[10px] uppercase font-black px-2 py-0.5 rounded-md bg-white border">
+                      {newRemindersEnabled ? 'ANO' : 'NE'}
+                    </span>
+                  </button>
+                </div>
+
+                {/* Reminder Interval */}
+                {newRemindersEnabled && (
+                  <div className="space-y-1.5 md:col-span-2">
+                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block">Interval podávání</label>
+                    <select
+                      value={newIntervalHours}
+                      onChange={(e) => setNewIntervalHours(Number(e.target.value))}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3.5 text-sm font-semibold text-slate-700 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition"
+                    >
+                      <option value={4}>⏱️ Každé 4 hodiny (střídání léků, např. Paralen a Nurofen)</option>
+                      <option value={6}>⏱️ Každých 6 hodin (4x denně, např. některé sirupy/antibiotika)</option>
+                      <option value={8}>⏱️ Každých 8 hodin (3x denně, standardní interval pro teplotu)</option>
+                      <option value={12}>⏱️ Každých 12 hodin (2x denně, ráno a večer)</option>
+                      <option value={24}>⏱️ Každých 24 hodin (1x denně, např. protialergické sirupy)</option>
+                    </select>
+                  </div>
+                )}
 
               </div>
 
@@ -503,6 +763,77 @@ export default function MedicationView({
                             </span>
                           </div>
                         )}
+
+                        {/* Reminders & Next Dose Block */}
+                        <div className="sm:col-span-2 border-t border-slate-100 pt-3 mt-1 space-y-2">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Upozornění:</span>
+                              <button
+                                onClick={() => handleToggleCardReminder(med.id, !!med.remindersEnabled)}
+                                className={`text-[10px] font-extrabold px-2.5 py-1 rounded-lg uppercase tracking-wider transition-all flex items-center gap-1 cursor-pointer ${
+                                  med.remindersEnabled 
+                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-100 hover:bg-emerald-100' 
+                                    : 'bg-slate-100 text-slate-500 border border-slate-200 hover:bg-slate-200'
+                                }`}
+                              >
+                                {med.remindersEnabled ? (
+                                  <>
+                                    <Bell className="w-3 h-3 text-emerald-600 animate-pulse" /> Aktivní
+                                  </>
+                                ) : (
+                                  <>
+                                    <BellOff className="w-3 h-3" /> Vypnuto
+                                  </>
+                                )}
+                              </button>
+                            </div>
+
+                            {/* Interval Editor */}
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Interval:</span>
+                              <select
+                                value={med.intervalHours || 8}
+                                onChange={(e) => handleUpdateCardInterval(med.id, Number(e.target.value))}
+                                className="bg-white border border-slate-200 rounded-xl px-2 py-1 text-[11px] font-bold text-slate-700 focus:outline-hidden cursor-pointer"
+                              >
+                                <option value={4}>4 hod. (střídavě)</option>
+                                <option value={6}>6 hod. (4x denně)</option>
+                                <option value={8}>8 hod. (3x denně)</option>
+                                <option value={12}>12 hod. (2x denně)</option>
+                                <option value={24}>24 hod. (1x denně)</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          {/* Countdown / Overdue Display */}
+                          {med.remindersEnabled && med.intervalHours && med.lastGiven && (() => {
+                            const info = getNextDoseInfo(med);
+                            if (!info) return null;
+                            return (
+                              <div className={`p-3 rounded-xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 transition ${
+                                info.isOverdue 
+                                  ? 'bg-rose-50 border-rose-100 text-rose-800' 
+                                  : 'bg-indigo-50/40 border-indigo-100/60 text-indigo-950'
+                              }`}>
+                                <div className="flex items-center gap-2">
+                                  <Clock className={`w-4 h-4 ${info.isOverdue ? 'text-rose-500 animate-pulse' : 'text-indigo-500'}`} />
+                                  <div className="text-xs">
+                                    <span className="font-extrabold">{info.relativeText}</span>
+                                    <span className="text-[10px] block opacity-75">
+                                      Další dávka má být podána v <strong className="font-bold">{info.formattedNextTime}</strong> ({info.formattedNextDate})
+                                    </span>
+                                  </div>
+                                </div>
+                                {info.isOverdue && (
+                                  <span className="px-2 py-0.5 rounded-md bg-rose-100 text-rose-700 font-black text-[9px] uppercase tracking-wider animate-pulse shrink-0">
+                                    MÁ ZPOŽDĚNÍ! ⚠️
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </div>
                       </div>
 
                       {/* Quick "Give Medication" section */}

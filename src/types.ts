@@ -170,6 +170,8 @@ export interface MedicationLog {
   givenBy: string; // Member ID (who gave it last)
   notes?: string;
   history: MedicationHistoryEntry[];
+  intervalHours?: number; // Dose interval in hours (e.g. 4, 6, 8, 12, 24)
+  remindersEnabled?: boolean; // True if automatic reminders are enabled
 }
 
 export interface HomeworkTask {
@@ -185,6 +187,13 @@ export interface HomeworkTask {
   createdAt: string;
 }
 
-
-
-
+export interface PocketMoneyTransaction {
+  id: string;
+  childId: string; // The child receiving or spending
+  type: 'credit' | 'debit'; // credit = given by parent, debit = spent by child
+  amount: number;
+  purpose: string; // e.g. "Kapesné", "Zmrzlina"
+  date: string; // YYYY-MM-DD
+  recordedBy: string; // Member ID who recorded this (parent or child)
+  notes?: string;
+}
